@@ -4,7 +4,7 @@ const db = new sqlite3.Database("./gastos.db"); // arquivo físico no projeto
 // cria tabela de gastos
 db.serialize(() => {
   db.run(`
-    CREATE TABLE gastos (
+    CREATE TABLE IF NOT EXISTS gastos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       usuario TEXT,
       valor REAL,
