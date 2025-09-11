@@ -31,8 +31,7 @@ const pool = new Pool({
   }
 })();
 
-// Webhook Twilio
-app.post("/webhook", async (req, res) => {
+app.post("/whatsapp", async (req, res) => {
   console.log("📩 Requisição recebida:", req.body); // VERIFICAR O QUE CHEGOU
 
   const mensagem = req.body.Body?.trim() || "";
