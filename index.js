@@ -5,33 +5,37 @@ const { Pool } = require("pg");
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Conexão com Supabase (use a variável de ambiente DATABASE_URL)
+// Conexão com Supabase (URL vem da variável de ambiente no Render)
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL, // ex: postgresql://postgres:SENHA@db.xxxxx.supabase.co:5432/postgres?sslmode=require
   ssl: { rejectUnauthorized: false },
 });
 
 // Garante que a tabela existe
 (async () => {
-  await pool.query(`
-    create table if not exists gastos (
-      id serial primary key,
-      categoria text,
-      valor numeric,
-      data timestamp default now()
-    )
-  `);
+  try {
+    await pool.query(`
+      create table if not exists gastos (
+        id serial primary key,
+        categoria text,
+        valor numeric,
+        data timestamp default now()
+      )
+    `);
+    console.log("✅ Tabela pronta");
+  } catch (err) {
+    console.error("❌ Erro criando tabela:", err);
+  }
 })();
 
-// Salvar gasto
+// Webhook Twilio
 app.post("/webhook", async (req, res) => {
   const mensagem = req.body.Body?.trim() || "";
-  const from = req.body.From || "";
-
   let resposta = "❓ Não entendi. Envie no formato: 20 mercado";
 
   try {
     if (/^\d+(\.\d{1,2})?\s+\w+/.test(mensagem)) {
+      // Ex: "20 mercado"
       const [valorStr, ...catArr] = mensagem.split(" ");
       const valor = parseFloat(valorStr);
       const categoria = catArr.join(" ");
@@ -54,7 +58,7 @@ app.post("/webhook", async (req, res) => {
       if (result.rows.length === 0) {
         resposta = "📭 Nenhum gasto registrado ainda.";
       } else {
-        // Descobre a menor data geral
+        // Data mais antiga geral
         const todasDatas = result.rows.map((r) => r.primeira_data);
         const primeiraInsercao = new Date(
           Math.min(...todasDatas.map((d) => new Date(d)))
@@ -72,7 +76,7 @@ app.post("/webhook", async (req, res) => {
       resposta = "🗑️ Todos os gastos foram apagados!";
     }
   } catch (err) {
-    console.error(err);
+    console.error("❌ Erro no webhook:", err);
     resposta = "⚠️ Erro ao processar sua mensagem.";
   }
 
@@ -80,10 +84,10 @@ app.post("/webhook", async (req, res) => {
   res.type("text/xml").send(twiml);
 });
 
-// Endpoint para teste/ping
+// Endpoint de status para teste/ping
 app.get("/", (req, res) => {
   res.send("Bot online ✅");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Bot rodando na porta ${PORT}`));
