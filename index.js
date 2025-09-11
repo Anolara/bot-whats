@@ -5,21 +5,21 @@ const { Pool } = require("pg");
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Conexão com Supabase (URL vem da variável de ambiente no Render)
+// Conexão com PostgreSQL Railway
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL, // ex: postgresql://postgres:SENHA@db.xxxxx.supabase.co:5432/postgres?sslmode=require
-  ssl: { rejectUnauthorized: false },
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // necessário para Railway
 });
 
-// Garante que a tabela existe
+// Cria tabela se não existir
 (async () => {
   try {
     await pool.query(`
-      create table if not exists gastos (
-        id serial primary key,
-        categoria text,
-        valor numeric,
-        data timestamp default now()
+      CREATE TABLE IF NOT EXISTS gastos (
+        id SERIAL PRIMARY KEY,
+        categoria TEXT,
+        valor NUMERIC,
+        data TIMESTAMP DEFAULT NOW()
       )
     `);
     console.log("✅ Tabela pronta");
@@ -35,30 +35,28 @@ app.post("/webhook", async (req, res) => {
 
   try {
     if (/^\d+(\.\d{1,2})?\s+\w+/.test(mensagem)) {
-      // Ex: "20 mercado"
       const [valorStr, ...catArr] = mensagem.split(" ");
       const valor = parseFloat(valorStr);
       const categoria = catArr.join(" ");
 
       await pool.query(
-        "insert into gastos (categoria, valor) values ($1, $2)",
+        "INSERT INTO gastos (categoria, valor) VALUES ($1, $2)",
         [categoria, valor]
       );
 
       resposta = `✅ Gasto de R$ ${valor.toFixed(
         2
-      )} em "${categoria}" registrado com sucesso!`;
+      )} em "${categoria}" registrado!`;
     } else if (mensagem.toLowerCase() === "total") {
       const result = await pool.query(`
-        select categoria, sum(valor) as total, min(data) as primeira_data
-        from gastos
-        group by categoria
+        SELECT categoria, SUM(valor) AS total, MIN(data) AS primeira_data
+        FROM gastos
+        GROUP BY categoria
       `);
 
       if (result.rows.length === 0) {
         resposta = "📭 Nenhum gasto registrado ainda.";
       } else {
-        // Data mais antiga geral
         const todasDatas = result.rows.map((r) => r.primeira_data);
         const primeiraInsercao = new Date(
           Math.min(...todasDatas.map((d) => new Date(d)))
@@ -72,7 +70,7 @@ app.post("/webhook", async (req, res) => {
         });
       }
     } else if (mensagem.toLowerCase() === "limpar") {
-      await pool.query("delete from gastos");
+      await pool.query("DELETE FROM gastos");
       resposta = "🗑️ Todos os gastos foram apagados!";
     }
   } catch (err) {
@@ -84,7 +82,7 @@ app.post("/webhook", async (req, res) => {
   res.type("text/xml").send(twiml);
 });
 
-// Endpoint de status para teste/ping
+// Endpoint de ping/teste
 app.get("/", (req, res) => {
   res.send("Bot online ✅");
 });
