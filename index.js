@@ -1,98 +1,89 @@
 const express = require("express");
 const bodyParser = require("body-parser");
-const db = require("./db"); // banco SQLite já configurado
-const app = express();
+const { Pool } = require("pg");
 
+const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-app.post("/whatsapp", (req, res) => {
-  const mensagem = (req.body.Body || "").trim().toLowerCase();
-  const usuario = req.body.From;
-  let resposta = "🤖 Envie '<valor> <categoria>', 'total' ou 'limpar'.";
+// Conexão com Supabase (use a variável de ambiente DATABASE_URL)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-  // Registrar gasto: ex "20 mercado" ou "50 fast food"
-  const regexGasto = /^(\d+(\.\d{1,2})?)\s+(.+)$/;
-  const match = mensagem.match(regexGasto);
+// Garante que a tabela existe
+(async () => {
+  await pool.query(`
+    create table if not exists gastos (
+      id serial primary key,
+      categoria text,
+      valor numeric,
+      data timestamp default now()
+    )
+  `);
+})();
 
-  if (match) {
-    const valor = parseFloat(match[1]);
-    const categoria = match[3];
+// Salvar gasto
+app.post("/webhook", async (req, res) => {
+  const mensagem = req.body.Body?.trim() || "";
+  const from = req.body.From || "";
 
-    db.run(
-      "INSERT INTO gastos (usuario, valor, categoria, descricao) VALUES (?, ?, ?, ?)",
-      [usuario, valor, categoria, mensagem]
-    );
+  let resposta = "❓ Não entendi. Envie no formato: 20 mercado";
 
-    resposta = `💰 Gasto registrado: R$ ${valor.toFixed(2)} em ${categoria}`;
-  }
-  // Mostrar total
-  else if (mensagem.includes("total")) {
-    // Primeiro, pega a data da primeira inserção
-    db.get(
-      "SELECT MIN(data) as primeira_data FROM gastos WHERE usuario = ?",
-      [usuario],
-      (err, primeiraRow) => {
-        if (err || !primeiraRow || !primeiraRow.primeira_data) {
-          resposta = "📊 Nenhum gasto registrado.";
-          const twiml = `<Response><Message>${resposta}</Message></Response>`;
-          res.set("Content-Type", "text/xml");
-          return res.send(twiml);
-        }
+  try {
+    if (/^\d+(\.\d{1,2})?\s+\w+/.test(mensagem)) {
+      const [valorStr, ...catArr] = mensagem.split(" ");
+      const valor = parseFloat(valorStr);
+      const categoria = catArr.join(" ");
 
-        const dataFormatada = new Date(
-          primeiraRow.primeira_data
-        ).toLocaleDateString("pt-BR");
+      await pool.query(
+        "insert into gastos (categoria, valor) values ($1, $2)",
+        [categoria, valor]
+      );
 
-        // Agora pega total por categoria
-        db.all(
-          "SELECT categoria, SUM(valor) as total FROM gastos WHERE usuario = ? GROUP BY categoria ORDER BY total DESC",
-          [usuario],
-          (err, rows) => {
-            if (err || !rows || rows.length === 0) {
-              resposta = "📊 Nenhum gasto registrado.";
-            } else {
-              let totalGeral = 0;
-              let texto = `📊 Total de gastos (desde ${dataFormatada}):\n`;
-              rows.forEach((row) => {
-                texto += `- ${row.categoria}: R$ ${row.total.toFixed(2)}\n`;
-                totalGeral += row.total;
-              });
-              texto += `Total geral: R$ ${totalGeral.toFixed(2)}`;
-              resposta = texto;
-            }
+      resposta = `✅ Gasto de R$ ${valor.toFixed(
+        2
+      )} em "${categoria}" registrado com sucesso!`;
+    } else if (mensagem.toLowerCase() === "total") {
+      const result = await pool.query(`
+        select categoria, sum(valor) as total, min(data) as primeira_data
+        from gastos
+        group by categoria
+      `);
 
-            const twiml = `<Response><Message>${resposta}</Message></Response>`;
-            res.set("Content-Type", "text/xml");
-            return res.send(twiml);
-          }
+      if (result.rows.length === 0) {
+        resposta = "📭 Nenhum gasto registrado ainda.";
+      } else {
+        // Descobre a menor data geral
+        const todasDatas = result.rows.map((r) => r.primeira_data);
+        const primeiraInsercao = new Date(
+          Math.min(...todasDatas.map((d) => new Date(d)))
         );
+
+        resposta = `💰 Total de gastos (desde ${primeiraInsercao.toLocaleDateString()}):`;
+        result.rows.forEach((r) => {
+          resposta += `\n- ${r.categoria}: R$ ${parseFloat(r.total).toFixed(
+            2
+          )}`;
+        });
       }
-    );
-    return;
-  }
-  // Limpar gastos do usuário
-  else if (mensagem.includes("limpar")) {
-    db.run("DELETE FROM gastos WHERE usuario = ?", [usuario], (err) => {
-      let resp = "❌ Erro ao limpar gastos.";
-      if (!err) resp = "✅ Seus gastos foram apagados!";
-      const twiml = `<Response><Message>${resp}</Message></Response>`;
-      res.set("Content-Type", "text/xml");
-      return res.send(twiml);
-    });
-    return;
+    } else if (mensagem.toLowerCase() === "limpar") {
+      await pool.query("delete from gastos");
+      resposta = "🗑️ Todos os gastos foram apagados!";
+    }
+  } catch (err) {
+    console.error(err);
+    resposta = "⚠️ Erro ao processar sua mensagem.";
   }
 
-  // Resposta padrão
   const twiml = `<Response><Message>${resposta}</Message></Response>`;
-  res.set("Content-Type", "text/xml");
-  res.send(twiml);
+  res.type("text/xml").send(twiml);
 });
 
-// Logs de requisições para depuração
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
-  next();
+// Endpoint para teste/ping
+app.get("/", (req, res) => {
+  res.send("Bot online ✅");
 });
 
-// Iniciar servidor
-app.listen(3000, () => console.log("Bot rodando na porta 3000"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Bot rodando na porta ${PORT}`));
