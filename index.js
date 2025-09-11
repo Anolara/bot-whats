@@ -3,12 +3,15 @@ const bodyParser = require("body-parser");
 const { Pool } = require("pg");
 
 const app = express();
+
+// Configura body-parser para JSON e URL encoded
+app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Conexão com PostgreSQL Railway
+// Conexão com PostgreSQL Railway (ou outro serviço)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // necessário para Railway
+  ssl: { rejectUnauthorized: false },
 });
 
 // Cria tabela se não existir
@@ -30,11 +33,14 @@ const pool = new Pool({
 
 // Webhook Twilio
 app.post("/webhook", async (req, res) => {
+  console.log("📩 Requisição recebida:", req.body); // VERIFICAR O QUE CHEGOU
+
   const mensagem = req.body.Body?.trim() || "";
   let resposta = "❓ Não entendi. Envie no formato: 20 mercado";
 
   try {
-    if (/^\d+(\.\d{1,2})?\s+\w+/.test(mensagem)) {
+    // Inserção de gasto
+    if (/^\d+(\.\d{1,2})?\s+.+/.test(mensagem)) {
       const [valorStr, ...catArr] = mensagem.split(" ");
       const valor = parseFloat(valorStr);
       const categoria = catArr.join(" ");
@@ -74,15 +80,16 @@ app.post("/webhook", async (req, res) => {
       resposta = "🗑️ Todos os gastos foram apagados!";
     }
   } catch (err) {
-    console.error("❌ Erro no webhook:", err);
-    resposta = "⚠️ Erro ao processar sua mensagem.";
+    console.error("❌ Erro processando mensagem:", err);
+    resposta = "⚠️ Ocorreu um erro ao processar sua mensagem.";
   }
 
+  // Sempre responde pro Twilio/Thunder Client
   const twiml = `<Response><Message>${resposta}</Message></Response>`;
   res.type("text/xml").send(twiml);
 });
 
-// Endpoint de ping/teste
+// Endpoint de teste/ping
 app.get("/", (req, res) => {
   res.send("Bot online ✅");
 });
