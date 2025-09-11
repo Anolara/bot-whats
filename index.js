@@ -67,7 +67,9 @@ app.post("/whatsapp", async (req, res) => {
           Math.min(...todasDatas.map((d) => new Date(d)))
         );
 
-        resposta = `💰 Total de gastos (desde ${primeiraInsercao.toLocaleDateString()}):`;
+        resposta = `💰 Total de gastos (desde ${primeiraInsercao.toLocaleDateString(
+          "pt-BR"
+        )}):`;
         result.rows.forEach((r) => {
           resposta += `\n- ${r.categoria}: R$ ${parseFloat(r.total).toFixed(
             2
